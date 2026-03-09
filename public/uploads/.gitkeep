@@ -1,0 +1,2 @@
+# Uploads directory — files saved here via /api/upload
+# Git-ignored in production; replace with S3/Cloudinary for prod deployments.
