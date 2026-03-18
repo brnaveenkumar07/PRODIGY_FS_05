@@ -46,7 +46,7 @@ export function Navbar() {
       <div className="mx-auto max-w-3xl flex h-14 items-center justify-between px-4">
         {/* Logo */}
         <Link href="/" className="flex items-center gap-2 font-bold text-lg">
-          <span className="text-primary">SocialApp</span>
+          <h1 className="max-w-7xl mx-auto text-center font-black leading-none text-transparent bg-clip-text bg-gradient-to-b from-[#8c8c8c] via-[#2b2b2b] to-[#010101] opacity-90 text-xs sm:text-sm md:text-base">SocialApp</h1>
         </Link>
 
         {/* Center nav */}
