@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Heart, MessageCircle, Trash2, MoreHorizontal } from "lucide-react";
+import { Heart, MessageCircle, Trash2, MoreHorizontal, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card";
 import {
@@ -115,18 +115,35 @@ export function PostCard({ post, onDelete }: PostCardProps) {
         <p className="text-sm whitespace-pre-wrap">{post.content}</p>
 
         {post.mediaUrl && post.mediaType === "image" && (
-          <div className="relative rounded-lg overflow-hidden bg-muted max-h-96">
+          <div className="relative overflow-hidden rounded-xl bg-card">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={post.mediaUrl}
               alt="Post media"
-              className="w-full object-cover max-h-96"
+              className="block h-auto w-full"
             />
           </div>
         )}
 
         {post.mediaUrl && post.mediaType === "video" && (
           <video src={post.mediaUrl} controls className="w-full rounded-lg max-h-96" />
+        )}
+
+        {post.mediaUrl && post.mediaType === "file" && (
+          <a
+            href={post.mediaUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center gap-3 rounded-lg border bg-muted/30 px-4 py-3 transition hover:bg-muted/50"
+          >
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-background text-foreground">
+              <FileText className="h-4 w-4" />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-foreground">Open attachment</p>
+              <p className="text-xs text-muted-foreground">View or download the attached file</p>
+            </div>
+          </a>
         )}
 
         {post.tags.length > 0 && (

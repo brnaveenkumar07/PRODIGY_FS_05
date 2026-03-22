@@ -7,9 +7,23 @@ import { apiSuccess, apiError } from "@/lib/utils";
 
 const UPLOAD_DIR = join(process.cwd(), "public", "uploads");
 const MAX_SIZE = 20 * 1024 * 1024; // 20MB
-const HAS_BLOB_TOKEN = Boolean(process.env.BLOB_READ_WRITE_TOKEN);
 
-const MIME_TO_MEDIA_TYPE: Record<string, "image" | "video"> = {
+function getBlobToken(): string | null {
+  const token = process.env.BLOB_READ_WRITE_TOKEN?.trim();
+  if (!token) return null;
+
+  // Common placeholder values should not be treated as configured credentials.
+  if (
+    token === "vercel_blob_read_write_token" ||
+    token === "your_vercel_blob_token"
+  ) {
+    return null;
+  }
+
+  return token;
+}
+
+const MIME_TO_MEDIA_TYPE: Record<string, "image" | "video" | "file"> = {
   "image/jpeg": "image",
   "image/jpg": "image",
   "image/pjpeg": "image",
@@ -28,7 +42,7 @@ const MIME_TO_MEDIA_TYPE: Record<string, "image" | "video"> = {
   "video/x-matroska": "video",
 };
 
-const EXT_TO_MEDIA_TYPE: Record<string, "image" | "video"> = {
+const EXT_TO_MEDIA_TYPE: Record<string, "image" | "video" | "file"> = {
   jpg: "image",
   jpeg: "image",
   png: "image",
@@ -45,24 +59,43 @@ const EXT_TO_MEDIA_TYPE: Record<string, "image" | "video"> = {
   mov: "video",
   avi: "video",
   mkv: "video",
+  pdf: "file",
+  doc: "file",
+  docx: "file",
+  xls: "file",
+  xlsx: "file",
+  ppt: "file",
+  pptx: "file",
+  txt: "file",
+  csv: "file",
+  zip: "file",
+  rar: "file",
+  "7z": "file",
+  mp3: "file",
+  wav: "file",
+  json: "file",
 };
 
 function getExtension(filename: string): string {
   return filename.split(".").pop()?.toLowerCase() ?? "";
 }
 
-function buildFilename(userId: string, originalName: string, mediaType: "image" | "video"): string {
-  const ext = getExtension(originalName) || (mediaType === "image" ? "jpg" : "mp4");
+function buildFilename(userId: string, originalName: string, mediaType: "image" | "video" | "file"): string {
+  const ext = getExtension(originalName) || (mediaType === "image" ? "jpg" : mediaType === "video" ? "mp4" : "bin");
   return `posts/${userId}/${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${ext}`;
 }
 
-function detectMediaType(file: File): "image" | "video" | null {
+function detectMediaType(file: File): "image" | "video" | "file" {
   const mimeType = file.type.toLowerCase();
   if (MIME_TO_MEDIA_TYPE[mimeType]) return MIME_TO_MEDIA_TYPE[mimeType];
 
+  if (mimeType.startsWith("image/")) return "image";
+  if (mimeType.startsWith("video/")) return "video";
+  if (mimeType) return "file";
+
   // Some clients send generic or empty MIME type; fallback to extension.
   const ext = getExtension(file.name);
-  return EXT_TO_MEDIA_TYPE[ext] ?? null;
+  return EXT_TO_MEDIA_TYPE[ext] ?? "file";
 }
 
 export async function POST(req: NextRequest) {
@@ -77,26 +110,28 @@ export async function POST(req: NextRequest) {
     if (file.size > MAX_SIZE) return apiError("File too large (max 20MB)", 400);
 
     const mediaType = detectMediaType(file);
-    if (!mediaType) {
-      return apiError("Unsupported file type. Please upload a common image or video format.", 400);
-    }
-
     const filename = buildFilename(session.userId, file.name, mediaType);
+    const blobToken = getBlobToken();
 
-    if (HAS_BLOB_TOKEN) {
-      const blob = await put(filename, file, {
-        access: "public",
-        addRandomSuffix: false,
-        contentType: file.type || undefined,
-      });
+    if (blobToken) {
+      try {
+        const blob = await put(filename, file, {
+          access: "public",
+          addRandomSuffix: false,
+          contentType: file.type || undefined,
+          token: blobToken,
+        });
 
-      return apiSuccess(
-        {
-          url: blob.url,
-          mediaType,
-        },
-        201
-      );
+        return apiSuccess(
+          {
+            url: blob.url,
+            mediaType,
+          },
+          201
+        );
+      } catch (error) {
+        console.error("Blob upload failed, falling back to local storage:", error);
+      }
     }
 
     const localFilename = filename.split("/").pop() ?? filename;
@@ -111,7 +146,8 @@ export async function POST(req: NextRequest) {
       },
       201
     );
-  } catch {
+  } catch (error) {
+    console.error("Upload failed:", error);
     return apiError("Failed to upload file", 500);
   }
 }

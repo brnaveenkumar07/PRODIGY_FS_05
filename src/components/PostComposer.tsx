@@ -4,7 +4,7 @@ import { useState, useRef } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { ImagePlus, X, Loader2 } from "lucide-react";
+import { FileText, ImagePlus, X, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
@@ -14,6 +14,7 @@ import { UserAvatar } from "./UserAvatar";
 import { useSession } from "@/hooks/use-session";
 import { toast } from "sonner";
 import type { Post } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 // Focused schema just for the form — tags managed in state
 const composerSchema = z.object({
@@ -30,9 +31,9 @@ export function PostComposer({ onPostCreated }: PostComposerProps) {
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState("");
   const [mediaFile, setMediaFile] = useState<File | null>(null);
-  const [mediaUrlInput, setMediaUrlInput] = useState("");
   const [mediaPreview, setMediaPreview] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const {
@@ -68,51 +69,37 @@ export function PostComposer({ onPostCreated }: PostComposerProps) {
 
   const removeTag = (tag: string) => setTags(tags.filter((t) => t !== tag));
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  const setSelectedFile = (file: File | null) => {
     if (!file) return;
     if (file.size > 20 * 1024 * 1024) { toast.error("File too large (max 20MB)"); return; }
-    setMediaUrlInput("");
     setMediaFile(file);
     setMediaPreview(URL.createObjectURL(file));
   };
 
-  const handleMediaUrlChange = (value: string) => {
-    setMediaUrlInput(value);
-    if (value.trim()) {
-      setMediaFile(null);
-      setMediaPreview(value.trim());
-      if (fileRef.current) fileRef.current.value = "";
-    } else {
-      setMediaPreview(null);
-    }
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    setSelectedFile(file ?? null);
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    setSelectedFile(file ?? null);
   };
 
   const clearMedia = () => {
     setMediaFile(null);
-    setMediaUrlInput("");
     setMediaPreview(null);
+    setIsDragging(false);
     if (fileRef.current) fileRef.current.value = "";
   };
 
   const onSubmit = async (data: ComposerFormData) => {
     let mediaUrl: string | undefined;
-    let mediaType: "image" | "video" | undefined;
+    let mediaType: "image" | "video" | "file" | undefined;
 
-    if (mediaUrlInput.trim()) {
-      try {
-        const parsed = new URL(mediaUrlInput.trim());
-        if (!["http:", "https:"].includes(parsed.protocol)) {
-          toast.error("Media URL must start with http or https");
-          return;
-        }
-        mediaUrl = parsed.toString();
-        mediaType = "image";
-      } catch {
-        toast.error("Enter a valid media URL");
-        return;
-      }
-    } else if (mediaFile) {
+    if (mediaFile) {
       setUploading(true);
       try {
         const fd = new FormData();
@@ -169,41 +156,110 @@ export function PostComposer({ onPostCreated }: PostComposerProps) {
             <p className="text-xs text-destructive">{errors.content.message}</p>
           )}
 
-          {mediaPreview && (
-            <div className="relative rounded-lg overflow-hidden border">
-              {mediaFile ? (
-                mediaFile.type.startsWith("image/") ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={mediaPreview} alt="preview" className="max-h-48 w-auto object-cover" />
-                ) : (
-                  <video src={mediaPreview} className="max-h-48 w-full" controls />
-                )
-              ) : (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={mediaPreview} alt="preview" className="max-h-48 w-auto object-cover" />
-              )}
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex items-start justify-between gap-3">
+              <div className="space-y-1">
+                <p className="text-sm font-semibold text-slate-900">Add media</p>
+                <p className="text-xs leading-5 text-slate-500">
+                  Upload a photo or video from your device.
+                </p>
+              </div>
               <Button
                 type="button"
-                variant="destructive"
-                size="icon"
-                className="absolute top-2 right-2 h-6 w-6"
-                onClick={clearMedia}
+                variant="outline"
+                size="sm"
+                onClick={() => fileRef.current?.click()}
+                className="rounded-lg border-slate-300 bg-white px-4 text-slate-700 hover:bg-slate-50"
               >
-                <X className="h-3 w-3" />
+                Select file
               </Button>
             </div>
-          )}
 
-          {/* Tag input */}
+            {!mediaPreview && (
+              <div
+                className={cn(
+                  "mt-4 flex w-full flex-col items-center justify-center rounded-xl border border-dashed px-6 py-10 text-center transition",
+                  isDragging
+                    ? "border-slate-900 bg-slate-50"
+                    : "border-slate-300 bg-slate-50/60 hover:border-slate-400 hover:bg-slate-50"
+                )}
+                onClick={() => fileRef.current?.click()}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setIsDragging(true);
+                }}
+                onDragEnter={(e) => {
+                  e.preventDefault();
+                  setIsDragging(true);
+                }}
+                onDragLeave={(e) => {
+                  e.preventDefault();
+                  if (e.currentTarget === e.target) {
+                    setIsDragging(false);
+                  }
+                }}
+                onDrop={handleDrop}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    fileRef.current?.click();
+                  }
+                }}
+              >
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-900 text-white">
+                  <ImagePlus className="h-4 w-4" />
+                </div>
+                <p className="mt-3 text-sm font-semibold text-slate-900">
+                  {isDragging ? "Release to upload" : "Drag and drop a file here"}
+                </p>
+                <p className="mt-1 max-w-sm text-xs leading-5 text-slate-500">
+                  Or click to browse. Supports images, videos, and other files up to 20MB.
+                </p>
+              </div>
+            )}
+
+            {mediaPreview && (
+              <div className="mt-4 overflow-hidden rounded-xl border border-slate-200 bg-white">
+                <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium text-slate-900">Selected media</p>
+                    <p className="truncate text-xs text-slate-500">{mediaFile?.name ?? "Selected media"}</p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    className="h-8 w-8 rounded-full text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+                    onClick={clearMedia}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+                {mediaFile?.type.startsWith("image/") ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={mediaPreview} alt="preview" className="block h-auto w-full" />
+                ) : mediaFile?.type.startsWith("video/") ? (
+                  <video src={mediaPreview} className="max-h-72 w-full bg-black object-contain" controls />
+                ) : (
+                  <div className="flex items-center gap-3 px-4 py-5">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-700">
+                      <FileText className="h-4 w-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-slate-900">{mediaFile?.name}</p>
+                      <p className="text-xs text-slate-500">Attached file</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           <div className="space-y-2">
-            <Input
-              value={mediaUrlInput}
-              onChange={(e) => handleMediaUrlChange(e.target.value)}
-              placeholder="Paste an image URL from the internet"
-              className="h-9 text-sm"
-            />
-            <p className="text-xs text-muted-foreground">
-              Use either an internet image URL or upload a local image/video file.
+            <p className="text-xs font-medium uppercase tracking-[0.18em] text-slate-400">
+              Tags
             </p>
             <div className="flex gap-2">
               <Input
@@ -211,17 +267,22 @@ export function PostComposer({ onPostCreated }: PostComposerProps) {
                 onChange={(e) => setTagInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addTag(); } }}
                 placeholder="Add tag (press Enter)"
-                className="h-7 text-xs"
+                className="h-9 rounded-xl border-slate-300 bg-white text-sm"
               />
-              <Button type="button" variant="outline" size="sm" onClick={addTag} className="h-7 text-xs">
+              <Button type="button" variant="outline" size="sm" onClick={addTag} className="h-9 rounded-xl px-4 text-sm">
                 Add
               </Button>
             </div>
             {tags.length > 0 && (
-              <div className="flex flex-wrap gap-1">
+              <div className="flex flex-wrap gap-2">
                 {tags.map((tag) => (
-                  <Badge key={tag} variant="secondary" className="gap-1 cursor-pointer" onClick={() => removeTag(tag)}>
-                    #{tag} <X className="h-2.5 w-2.5" />
+                  <Badge
+                    key={tag}
+                    variant="secondary"
+                    className="cursor-pointer gap-1 rounded-full bg-slate-100 px-3 py-1 text-slate-700 hover:bg-slate-200"
+                    onClick={() => removeTag(tag)}
+                  >
+                    #{tag} <X className="h-3 w-3" />
                   </Badge>
                 ))}
               </div>
@@ -231,22 +292,15 @@ export function PostComposer({ onPostCreated }: PostComposerProps) {
           <input
             ref={fileRef}
             type="file"
-            accept="image/*,video/*"
+            accept="*/*"
             className="hidden"
             onChange={handleFileChange}
           />
         </CardContent>
         <CardFooter className="flex items-center justify-between pt-0">
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => fileRef.current?.click()}
-            className="gap-2 text-muted-foreground"
-          >
-            <ImagePlus className="h-4 w-4" />
-            Media
-          </Button>
+          <div className="text-xs text-muted-foreground">
+            Local image and video uploads only
+          </div>
           <div className="flex items-center gap-2">
             <span className={`text-xs ${content.length > 1800 ? "text-destructive" : "text-muted-foreground"}`}>
               {content.length}/2000

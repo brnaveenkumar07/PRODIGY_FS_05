@@ -33,7 +33,7 @@ export const createPostSchema = z.object({
       z.string().regex(/^\/uploads\/.+/, "Invalid media path"),
     ])
     .optional(),
-  mediaType: z.enum(["image", "video"]).optional(),
+  mediaType: z.enum(["image", "video", "file"]).optional(),
 });
 
 // Comment validators
