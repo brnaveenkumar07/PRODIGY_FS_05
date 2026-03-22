@@ -6,6 +6,7 @@ import { apiSuccess, apiError } from "@/lib/utils";
 
 const UPLOAD_DIR = join(process.cwd(), "public", "uploads");
 const MAX_SIZE = 20 * 1024 * 1024; // 20MB
+const IS_VERCEL = process.env.VERCEL === "1";
 
 const MIME_TO_MEDIA_TYPE: Record<string, "image" | "video"> = {
   "image/jpeg": "image",
@@ -63,6 +64,13 @@ export async function POST(req: NextRequest) {
   if (!session) return apiError("Unauthorized", 401);
 
   try {
+    if (IS_VERCEL) {
+      return apiError(
+        "File uploads are not configured for Vercel yet. Use external object storage like Vercel Blob, S3, or Cloudinary.",
+        501
+      );
+    }
+
     const formData = await req.formData();
     const file = formData.get("file") as File | null;
 
