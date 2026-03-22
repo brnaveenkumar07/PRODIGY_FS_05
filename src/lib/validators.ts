@@ -29,7 +29,7 @@ export const createPostSchema = z.object({
   tags: z.array(z.string().min(1).max(50)).max(10, "Too many tags").optional().default([]),
   mediaUrl: z
     .union([
-      z.string().url(),
+      z.string().url().refine((value) => /^https?:\/\//.test(value), "Media URL must start with http or https"),
       z.string().regex(/^\/uploads\/.+/, "Invalid media path"),
     ])
     .optional(),

@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import Image from "next/image";
 import { Heart, MessageCircle, Trash2, MoreHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card";
@@ -117,11 +116,10 @@ export function PostCard({ post, onDelete }: PostCardProps) {
 
         {post.mediaUrl && post.mediaType === "image" && (
           <div className="relative rounded-lg overflow-hidden bg-muted max-h-96">
-            <Image
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
               src={post.mediaUrl}
               alt="Post media"
-              width={600}
-              height={400}
               className="w-full object-cover max-h-96"
             />
           </div>

@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { put } from "@vercel/blob";
 import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
 import { getSession } from "@/lib/auth";
@@ -6,7 +7,7 @@ import { apiSuccess, apiError } from "@/lib/utils";
 
 const UPLOAD_DIR = join(process.cwd(), "public", "uploads");
 const MAX_SIZE = 20 * 1024 * 1024; // 20MB
-const IS_VERCEL = process.env.VERCEL === "1";
+const HAS_BLOB_TOKEN = Boolean(process.env.BLOB_READ_WRITE_TOKEN);
 
 const MIME_TO_MEDIA_TYPE: Record<string, "image" | "video"> = {
   "image/jpeg": "image",
@@ -50,6 +51,11 @@ function getExtension(filename: string): string {
   return filename.split(".").pop()?.toLowerCase() ?? "";
 }
 
+function buildFilename(userId: string, originalName: string, mediaType: "image" | "video"): string {
+  const ext = getExtension(originalName) || (mediaType === "image" ? "jpg" : "mp4");
+  return `posts/${userId}/${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${ext}`;
+}
+
 function detectMediaType(file: File): "image" | "video" | null {
   const mimeType = file.type.toLowerCase();
   if (MIME_TO_MEDIA_TYPE[mimeType]) return MIME_TO_MEDIA_TYPE[mimeType];
@@ -64,13 +70,6 @@ export async function POST(req: NextRequest) {
   if (!session) return apiError("Unauthorized", 401);
 
   try {
-    if (IS_VERCEL) {
-      return apiError(
-        "File uploads are not configured for Vercel yet. Use external object storage like Vercel Blob, S3, or Cloudinary.",
-        501
-      );
-    }
-
     const formData = await req.formData();
     const file = formData.get("file") as File | null;
 
@@ -82,16 +81,32 @@ export async function POST(req: NextRequest) {
       return apiError("Unsupported file type. Please upload a common image or video format.", 400);
     }
 
-    const ext = getExtension(file.name) || (mediaType === "image" ? "jpg" : "mp4");
-    const filename = `${session.userId}-${Date.now()}.${ext}`;
+    const filename = buildFilename(session.userId, file.name, mediaType);
 
+    if (HAS_BLOB_TOKEN) {
+      const blob = await put(filename, file, {
+        access: "public",
+        addRandomSuffix: false,
+        contentType: file.type || undefined,
+      });
+
+      return apiSuccess(
+        {
+          url: blob.url,
+          mediaType,
+        },
+        201
+      );
+    }
+
+    const localFilename = filename.split("/").pop() ?? filename;
     await mkdir(UPLOAD_DIR, { recursive: true });
     const buffer = Buffer.from(await file.arrayBuffer());
-    await writeFile(join(UPLOAD_DIR, filename), buffer);
+    await writeFile(join(UPLOAD_DIR, localFilename), buffer);
 
     return apiSuccess(
       {
-        url: `/uploads/${filename}`,
+        url: `/uploads/${localFilename}`,
         mediaType,
       },
       201

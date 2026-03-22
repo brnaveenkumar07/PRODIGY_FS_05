@@ -17,6 +17,7 @@ Set these variables locally and in Vercel:
 
 - `DATABASE_URL`: PostgreSQL connection string used by Prisma
 - `JWT_SECRET`: secret used to sign session cookies
+- `BLOB_READ_WRITE_TOKEN`: Vercel Blob token for file uploads
 
 ## Vercel Deployment
 
@@ -24,14 +25,16 @@ This project is now set up to deploy more cleanly on Vercel:
 
 - Prisma client generation runs during install via `postinstall`
 - The Next.js TypeScript build no longer checks `prisma/seed.ts`
-- The upload API returns a clear error on Vercel instead of writing to the non-persistent server filesystem
+- Uploaded files are stored in Vercel Blob when `BLOB_READ_WRITE_TOKEN` is configured
+- Posts can use either local uploads or direct internet image URLs
 
 Before deploying:
 
 1. Add `DATABASE_URL` in your Vercel project environment variables.
 2. Add `JWT_SECRET` in your Vercel project environment variables.
-3. Redeploy the project.
+3. Add `BLOB_READ_WRITE_TOKEN` in your Vercel project environment variables.
+4. Redeploy the project.
 
 Important note about uploads:
 
-Local file uploads to `public/uploads` work in development, but Vercel does not provide persistent local disk storage for production uploads. To support uploads in production, connect the upload route to object storage such as Vercel Blob, S3, or Cloudinary.
+When `BLOB_READ_WRITE_TOKEN` is present, uploaded files are stored in Vercel Blob and the returned public URL is saved on the post. Without that token, local development falls back to `public/uploads`.

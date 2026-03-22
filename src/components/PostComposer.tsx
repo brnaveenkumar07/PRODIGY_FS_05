@@ -30,6 +30,7 @@ export function PostComposer({ onPostCreated }: PostComposerProps) {
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState("");
   const [mediaFile, setMediaFile] = useState<File | null>(null);
+  const [mediaUrlInput, setMediaUrlInput] = useState("");
   const [mediaPreview, setMediaPreview] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -71,12 +72,25 @@ export function PostComposer({ onPostCreated }: PostComposerProps) {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 20 * 1024 * 1024) { toast.error("File too large (max 20MB)"); return; }
+    setMediaUrlInput("");
     setMediaFile(file);
     setMediaPreview(URL.createObjectURL(file));
   };
 
+  const handleMediaUrlChange = (value: string) => {
+    setMediaUrlInput(value);
+    if (value.trim()) {
+      setMediaFile(null);
+      setMediaPreview(value.trim());
+      if (fileRef.current) fileRef.current.value = "";
+    } else {
+      setMediaPreview(null);
+    }
+  };
+
   const clearMedia = () => {
     setMediaFile(null);
+    setMediaUrlInput("");
     setMediaPreview(null);
     if (fileRef.current) fileRef.current.value = "";
   };
@@ -85,7 +99,20 @@ export function PostComposer({ onPostCreated }: PostComposerProps) {
     let mediaUrl: string | undefined;
     let mediaType: "image" | "video" | undefined;
 
-    if (mediaFile) {
+    if (mediaUrlInput.trim()) {
+      try {
+        const parsed = new URL(mediaUrlInput.trim());
+        if (!["http:", "https:"].includes(parsed.protocol)) {
+          toast.error("Media URL must start with http or https");
+          return;
+        }
+        mediaUrl = parsed.toString();
+        mediaType = "image";
+      } catch {
+        toast.error("Enter a valid media URL");
+        return;
+      }
+    } else if (mediaFile) {
       setUploading(true);
       try {
         const fd = new FormData();
@@ -144,11 +171,16 @@ export function PostComposer({ onPostCreated }: PostComposerProps) {
 
           {mediaPreview && (
             <div className="relative rounded-lg overflow-hidden border">
-              {mediaFile?.type.startsWith("image/") ? (
+              {mediaFile ? (
+                mediaFile.type.startsWith("image/") ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={mediaPreview} alt="preview" className="max-h-48 w-auto object-cover" />
+                ) : (
+                  <video src={mediaPreview} className="max-h-48 w-full" controls />
+                )
+              ) : (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={mediaPreview} alt="preview" className="max-h-48 w-auto object-cover" />
-              ) : (
-                <video src={mediaPreview} className="max-h-48 w-full" controls />
               )}
               <Button
                 type="button"
@@ -164,6 +196,15 @@ export function PostComposer({ onPostCreated }: PostComposerProps) {
 
           {/* Tag input */}
           <div className="space-y-2">
+            <Input
+              value={mediaUrlInput}
+              onChange={(e) => handleMediaUrlChange(e.target.value)}
+              placeholder="Paste an image URL from the internet"
+              className="h-9 text-sm"
+            />
+            <p className="text-xs text-muted-foreground">
+              Use either an internet image URL or upload a local image/video file.
+            </p>
             <div className="flex gap-2">
               <Input
                 value={tagInput}
