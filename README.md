@@ -242,8 +242,5 @@ Possible next enhancements include:
 ## License
 
 This project is available for educational and portfolio use. Add a formal license if you plan to distribute or open-source it publicly.
-<<<<<<< HEAD
-=======
 
 Live Demo: https://social-app-naveen.vercel.app/
->>>>>>> 4dd92f9ebc68cd964ea36908372c1f49b431fb64
