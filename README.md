@@ -35,8 +35,8 @@ Before deploying:
 3. Add `BLOB_READ_WRITE_TOKEN` in your Vercel project environment variables.
 4. Redeploy the project.
 
+Live Demo: https://social-app-naveen.vercel.app/
+
 Important note about uploads:
 
 When `BLOB_READ_WRITE_TOKEN` is present, uploaded files are stored in Vercel Blob and the returned public URL is saved on the post. Without that token, local development falls back to `public/uploads`.
-
-Live Demo: https://social-app-naveen.vercel.app/
