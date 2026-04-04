@@ -107,6 +107,20 @@ function getErrorMessage(error: unknown): string {
   return "Unknown upload error";
 }
 
+async function uploadToBlob(
+  filename: string,
+  buffer: Buffer,
+  contentType?: string,
+  token?: string
+) {
+  return put(filename, buffer, {
+    access: "public",
+    addRandomSuffix: false,
+    contentType,
+    ...(token ? { token } : {}),
+  });
+}
+
 export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session) return apiError("Unauthorized", 401);
@@ -123,45 +137,46 @@ export async function POST(req: NextRequest) {
     const blobToken = getBlobToken();
     const buffer = Buffer.from(await file.arrayBuffer());
 
-    // In production, always try Vercel Blob first. When deployed in the same
-    // Vercel project as the Blob store, the SDK can resolve the token from
-    // the deployment environment even if our manual pre-check returns null.
+    // Support both Vercel Blob modes:
+    // 1. Project-connected Blob store, where Vercel resolves credentials.
+    // 2. Explicit read/write token, useful outside the connected project flow.
     if (blobToken || IS_PRODUCTION) {
-      try {
-        const blobOptions: {
-          access: "public";
-          addRandomSuffix: false;
-          contentType?: string;
-          token?: string;
-        } = {
-          access: "public",
-          addRandomSuffix: false,
-          contentType: file.type || undefined,
-        };
+      const attempts: Array<{ label: string; token?: string }> = IS_PRODUCTION
+        ? [
+            { label: "project-connected Blob store" },
+            ...(blobToken ? [{ label: "explicit Blob token", token: blobToken }] : []),
+          ]
+        : blobToken
+          ? [{ label: "explicit Blob token", token: blobToken }]
+          : [];
 
-        if (blobToken) {
-          blobOptions.token = blobToken;
-        }
+      const errors: string[] = [];
 
-        const blob = await put(filename, buffer, blobOptions);
-
-        return apiSuccess(
-          {
-            url: blob.url,
-            mediaType,
-          },
-          201
-        );
-      } catch (error) {
-        const message = getErrorMessage(error);
-        console.error("Blob upload failed:", error);
-
-        if (IS_PRODUCTION) {
-          return apiError(
-            `Cloud upload failed: ${message}`,
-            500
+      for (const attempt of attempts) {
+        try {
+          const blob = await uploadToBlob(
+            filename,
+            buffer,
+            file.type || undefined,
+            attempt.token
           );
+
+          return apiSuccess(
+            {
+              url: blob.url,
+              mediaType,
+            },
+            201
+          );
+        } catch (error) {
+          const message = getErrorMessage(error);
+          console.error(`Blob upload failed via ${attempt.label}:`, error);
+          errors.push(`${attempt.label}: ${message}`);
         }
+      }
+
+      if (IS_PRODUCTION && errors.length > 0) {
+        return apiError(`Cloud upload failed: ${errors.join(" | ")}`, 500);
       }
     }
 
