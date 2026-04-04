@@ -5,8 +5,12 @@ import { join } from "path";
 import { getSession } from "@/lib/auth";
 import { apiSuccess, apiError } from "@/lib/utils";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 const UPLOAD_DIR = join(process.cwd(), "public", "uploads");
 const MAX_SIZE = 20 * 1024 * 1024; // 20MB
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
 
 function getBlobToken(): string | null {
   const token = process.env.BLOB_READ_WRITE_TOKEN?.trim();
@@ -98,6 +102,11 @@ function detectMediaType(file: File): "image" | "video" | "file" {
   return EXT_TO_MEDIA_TYPE[ext] ?? "file";
 }
 
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  return "Unknown upload error";
+}
+
 export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session) return apiError("Unauthorized", 401);
@@ -112,10 +121,11 @@ export async function POST(req: NextRequest) {
     const mediaType = detectMediaType(file);
     const filename = buildFilename(session.userId, file.name, mediaType);
     const blobToken = getBlobToken();
+    const buffer = Buffer.from(await file.arrayBuffer());
 
     if (blobToken) {
       try {
-        const blob = await put(filename, file, {
+        const blob = await put(filename, buffer, {
           access: "public",
           addRandomSuffix: false,
           contentType: file.type || undefined,
@@ -130,13 +140,27 @@ export async function POST(req: NextRequest) {
           201
         );
       } catch (error) {
-        console.error("Blob upload failed, falling back to local storage:", error);
+        const message = getErrorMessage(error);
+        console.error("Blob upload failed:", error);
+
+        if (IS_PRODUCTION) {
+          return apiError(
+            `Cloud upload failed: ${message}`,
+            500
+          );
+        }
       }
+    }
+
+    if (IS_PRODUCTION) {
+      return apiError(
+        "File uploads are not configured for production. Add BLOB_READ_WRITE_TOKEN to your deployment environment.",
+        503
+      );
     }
 
     const localFilename = filename.split("/").pop() ?? filename;
     await mkdir(UPLOAD_DIR, { recursive: true });
-    const buffer = Buffer.from(await file.arrayBuffer());
     await writeFile(join(UPLOAD_DIR, localFilename), buffer);
 
     return apiSuccess(

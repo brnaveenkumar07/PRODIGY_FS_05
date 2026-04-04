@@ -179,6 +179,7 @@ The application supports two upload modes:
 
 - If `BLOB_READ_WRITE_TOKEN` is configured, uploads are stored in Vercel Blob and public URLs are saved with posts.
 - If the token is not configured, local development falls back to `public/uploads`.
+- Production deployments should not rely on local disk storage. On Vercel, `BLOB_READ_WRITE_TOKEN` is required for uploads to work.
 
 The upload route currently supports common image and video types, with a maximum file size of 20 MB.
 
@@ -190,14 +191,14 @@ Before deploying:
 
 1. Add `DATABASE_URL` to your deployment environment.
 2. Add `JWT_SECRET` to your deployment environment.
-3. Add `BLOB_READ_WRITE_TOKEN` if you want cloud-based uploads.
+3. Add `BLOB_READ_WRITE_TOKEN` to your deployment environment for production uploads.
 4. Ensure your PostgreSQL database is reachable from the deployment environment.
 
 Additional deployment details:
 
 - Prisma client generation runs automatically during install via `postinstall`.
 - The production build also regenerates the Prisma client before building Next.js.
-- Blob storage is optional, but recommended for production media handling.
+- Blob storage is optional for local development, but required for production-style deployments such as Vercel.
 
 ## Database Models
 

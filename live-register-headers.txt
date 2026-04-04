@@ -1,0 +1,15 @@
+HTTP/1.1 500 Internal Server Error
+Cache-Control: public, max-age=0, must-revalidate
+Content-Type: application/json
+Date: Sat, 04 Apr 2026 11:37:04 GMT
+Referrer-Policy: strict-origin-when-cross-origin
+Server: Vercel
+Strict-Transport-Security: max-age=63072000; includeSubDomains; preload
+Vary: rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch
+X-Content-Type-Options: nosniff
+X-Frame-Options: DENY
+X-Matched-Path: /api/auth/register
+X-Vercel-Cache: MISS
+X-Vercel-Id: bom1::iad1::szhkx-1775302624307-929847dbbf9c
+Transfer-Encoding: chunked
+
