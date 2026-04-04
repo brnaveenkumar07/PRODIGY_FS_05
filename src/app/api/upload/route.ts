@@ -1,22 +1,29 @@
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { put } from "@vercel/blob";
-import { writeFile, mkdir } from "fs/promises";
+import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
+import { mkdir, writeFile } from "fs/promises";
 import { join } from "path";
 import { getSession } from "@/lib/auth";
-import { apiSuccess, apiError } from "@/lib/utils";
+import { apiError, apiSuccess } from "@/lib/utils";
+import {
+  ALLOWED_CONTENT_TYPES,
+  MAX_UPLOAD_SIZE,
+  buildFilename,
+  detectMediaType,
+  getUploadValidationError,
+  isAllowedUploadPathname,
+} from "@/lib/media";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const UPLOAD_DIR = join(process.cwd(), "public", "uploads");
-const MAX_SIZE = 20 * 1024 * 1024; // 20MB
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
 
 function getBlobToken(): string | null {
   const token = process.env.BLOB_READ_WRITE_TOKEN?.trim();
   if (!token) return null;
 
-  // Common placeholder values should not be treated as configured credentials.
   if (
     token === "vercel_blob_read_write_token" ||
     token === "your_vercel_blob_token"
@@ -25,81 +32,6 @@ function getBlobToken(): string | null {
   }
 
   return token;
-}
-
-const MIME_TO_MEDIA_TYPE: Record<string, "image" | "video" | "file"> = {
-  "image/jpeg": "image",
-  "image/jpg": "image",
-  "image/pjpeg": "image",
-  "image/png": "image",
-  "image/gif": "image",
-  "image/webp": "image",
-  "image/avif": "image",
-  "image/bmp": "image",
-  "image/tiff": "image",
-  "image/heic": "image",
-  "image/heif": "image",
-  "video/mp4": "video",
-  "video/webm": "video",
-  "video/quicktime": "video",
-  "video/x-msvideo": "video",
-  "video/x-matroska": "video",
-};
-
-const EXT_TO_MEDIA_TYPE: Record<string, "image" | "video" | "file"> = {
-  jpg: "image",
-  jpeg: "image",
-  png: "image",
-  gif: "image",
-  webp: "image",
-  avif: "image",
-  bmp: "image",
-  tif: "image",
-  tiff: "image",
-  heic: "image",
-  heif: "image",
-  mp4: "video",
-  webm: "video",
-  mov: "video",
-  avi: "video",
-  mkv: "video",
-  pdf: "file",
-  doc: "file",
-  docx: "file",
-  xls: "file",
-  xlsx: "file",
-  ppt: "file",
-  pptx: "file",
-  txt: "file",
-  csv: "file",
-  zip: "file",
-  rar: "file",
-  "7z": "file",
-  mp3: "file",
-  wav: "file",
-  json: "file",
-};
-
-function getExtension(filename: string): string {
-  return filename.split(".").pop()?.toLowerCase() ?? "";
-}
-
-function buildFilename(userId: string, originalName: string, mediaType: "image" | "video" | "file"): string {
-  const ext = getExtension(originalName) || (mediaType === "image" ? "jpg" : mediaType === "video" ? "mp4" : "bin");
-  return `posts/${userId}/${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${ext}`;
-}
-
-function detectMediaType(file: File): "image" | "video" | "file" {
-  const mimeType = file.type.toLowerCase();
-  if (MIME_TO_MEDIA_TYPE[mimeType]) return MIME_TO_MEDIA_TYPE[mimeType];
-
-  if (mimeType.startsWith("image/")) return "image";
-  if (mimeType.startsWith("video/")) return "video";
-  if (mimeType) return "file";
-
-  // Some clients send generic or empty MIME type; fallback to extension.
-  const ext = getExtension(file.name);
-  return EXT_TO_MEDIA_TYPE[ext] ?? "file";
 }
 
 function getErrorMessage(error: unknown): string {
@@ -122,24 +54,56 @@ async function uploadToBlob(
 }
 
 export async function POST(req: NextRequest) {
-  const session = await getSession();
-  if (!session) return apiError("Unauthorized", 401);
-
   try {
+    const contentType = req.headers.get("content-type")?.toLowerCase() ?? "";
+    const blobToken = getBlobToken();
+
+    if (contentType.includes("application/json")) {
+      const body = (await req.json()) as HandleUploadBody;
+
+      const response = await handleUpload({
+        body,
+        request: req,
+        ...(blobToken ? { token: blobToken } : {}),
+        onBeforeGenerateToken: async (pathname) => {
+          const session = await getSession();
+          if (!session) {
+            throw new Error("Unauthorized");
+          }
+
+          if (!isAllowedUploadPathname(pathname, session.userId)) {
+            throw new Error("Invalid upload pathname");
+          }
+
+          return {
+            allowedContentTypes: [...ALLOWED_CONTENT_TYPES],
+            maximumSizeInBytes: MAX_UPLOAD_SIZE,
+            addRandomSuffix: false,
+          };
+        },
+        onUploadCompleted: async () => {
+          // The post record is created after the client receives the blob URL.
+        },
+      });
+
+      return NextResponse.json(response);
+    }
+
+    const session = await getSession();
+    if (!session) return apiError("Unauthorized", 401);
+
     const formData = await req.formData();
     const file = formData.get("file") as File | null;
 
     if (!file) return apiError("No file provided", 400);
-    if (file.size > MAX_SIZE) return apiError("File too large (max 20MB)", 400);
+
+    const validationError = getUploadValidationError(file);
+    if (validationError) return apiError(validationError, 400);
 
     const mediaType = detectMediaType(file);
     const filename = buildFilename(session.userId, file.name, mediaType);
-    const blobToken = getBlobToken();
     const buffer = Buffer.from(await file.arrayBuffer());
 
-    // Support both Vercel Blob modes:
-    // 1. Project-connected Blob store, where Vercel resolves credentials.
-    // 2. Explicit read/write token, useful outside the connected project flow.
     if (blobToken || IS_PRODUCTION) {
       const attempts: Array<{ label: string; token?: string }> = IS_PRODUCTION
         ? [
@@ -200,6 +164,6 @@ export async function POST(req: NextRequest) {
     );
   } catch (error) {
     console.error("Upload failed:", error);
-    return apiError("Failed to upload file", 500);
+    return apiError(getErrorMessage(error), 500);
   }
 }

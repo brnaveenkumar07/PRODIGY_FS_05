@@ -181,7 +181,7 @@ The application supports two upload modes:
 - If the token is not configured, local development falls back to `public/uploads`.
 - Production deployments should not rely on local disk storage. On Vercel, `BLOB_READ_WRITE_TOKEN` is required for uploads to work.
 
-The upload route currently supports common image and video types, with a maximum file size of 20 MB.
+The composer supports direct-to-Blob client uploads in production and accepts common image, video, audio, and document formats up to 100 MB. Local development still falls back to the server upload route and `public/uploads`.
 
 ## Deployment Notes
 

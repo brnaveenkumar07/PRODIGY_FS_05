@@ -1,29 +1,44 @@
 "use client";
 
-import { useState, useRef } from "react";
-import { useForm } from "react-hook-form";
+import { useEffect, useRef, useState } from "react";
+import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { FileText, ImagePlus, X, Loader2 } from "lucide-react";
+import { FileText, ImagePlus, Loader2, X } from "lucide-react";
+import { upload } from "@vercel/blob/client";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { UserAvatar } from "./UserAvatar";
 import { useSession } from "@/hooks/use-session";
 import { toast } from "sonner";
 import type { Post } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import {
+  FILE_INPUT_ACCEPT,
+  MAX_UPLOAD_SIZE,
+  buildFilename,
+  detectMediaType,
+  getUploadValidationError,
+  type MediaType,
+} from "@/lib/media";
 
-// Focused schema just for the form — tags managed in state
 const composerSchema = z.object({
   content: z.string().min(1, "Post content cannot be empty").max(2000, "Post too long"),
 });
+
 type ComposerFormData = z.infer<typeof composerSchema>;
 
 interface PostComposerProps {
   onPostCreated?: (post: Post) => void;
+}
+
+function formatBytes(value: number) {
+  if (value < 1024 * 1024) return `${Math.max(1, Math.round(value / 1024))} KB`;
+  return `${(value / (1024 * 1024)).toFixed(value >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
 }
 
 export function PostComposer({ onPostCreated }: PostComposerProps) {
@@ -33,21 +48,31 @@ export function PostComposer({ onPostCreated }: PostComposerProps) {
   const [mediaFile, setMediaFile] = useState<File | null>(null);
   const [mediaPreview, setMediaPreview] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
+  const [inputKey, setInputKey] = useState(0);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const {
+    control,
     register,
     handleSubmit,
     reset,
-    watch,
     formState: { isSubmitting, errors },
   } = useForm<ComposerFormData>({
     resolver: zodResolver(composerSchema),
     defaultValues: { content: "" },
   });
 
-  const content = watch("content", "");
+  const content = useWatch({ control, name: "content", defaultValue: "" });
+
+  useEffect(() => {
+    return () => {
+      if (mediaPreview) {
+        URL.revokeObjectURL(mediaPreview);
+      }
+    };
+  }, [mediaPreview]);
 
   if (!user) {
     return (
@@ -71,9 +96,20 @@ export function PostComposer({ onPostCreated }: PostComposerProps) {
 
   const setSelectedFile = (file: File | null) => {
     if (!file) return;
-    if (file.size > 20 * 1024 * 1024) { toast.error("File too large (max 20MB)"); return; }
+
+    const validationError = getUploadValidationError(file);
+    if (validationError) {
+      toast.error(validationError);
+      return;
+    }
+
+    if (mediaPreview) {
+      URL.revokeObjectURL(mediaPreview);
+    }
+
     setMediaFile(file);
     setMediaPreview(URL.createObjectURL(file));
+    setUploadProgress(0);
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -89,31 +125,72 @@ export function PostComposer({ onPostCreated }: PostComposerProps) {
   };
 
   const clearMedia = () => {
+    if (mediaPreview) {
+      URL.revokeObjectURL(mediaPreview);
+    }
+
     setMediaFile(null);
     setMediaPreview(null);
+    setUploadProgress(0);
     setIsDragging(false);
-    if (fileRef.current) fileRef.current.value = "";
+    setInputKey((value) => value + 1);
+  };
+
+  const uploadMedia = async (file: File): Promise<{ url: string; mediaType: MediaType }> => {
+    const mediaType = detectMediaType(file);
+    const pathname = buildFilename(user.id, file.name, mediaType);
+
+    if (process.env.NODE_ENV === "production") {
+      const blob = await upload(pathname, file, {
+        access: "public",
+        contentType: file.type || undefined,
+        handleUploadUrl: "/api/upload",
+        multipart: file.size > 5 * 1024 * 1024,
+        onUploadProgress: ({ percentage }) => {
+          setUploadProgress(Math.round(percentage));
+        },
+      });
+
+      return { url: blob.url, mediaType };
+    }
+
+    const fd = new FormData();
+    fd.append("file", file);
+
+    const res = await fetch("/api/upload", { method: "POST", body: fd });
+    const json = await res.json();
+
+    if (!res.ok) {
+      throw new Error(json.error ?? "Upload failed");
+    }
+
+    return {
+      url: json.data.url as string,
+      mediaType: json.data.mediaType as MediaType,
+    };
   };
 
   const onSubmit = async (data: ComposerFormData) => {
     let mediaUrl: string | undefined;
-    let mediaType: "image" | "video" | "file" | undefined;
+    let mediaType: MediaType | undefined;
 
     if (mediaFile) {
       setUploading(true);
+      setUploadProgress(0);
+
       try {
-        const fd = new FormData();
-        fd.append("file", mediaFile);
-        const res = await fetch("/api/upload", { method: "POST", body: fd });
-        const json = await res.json();
-        if (!res.ok) { toast.error(json.error ?? "Upload failed"); setUploading(false); return; }
-        mediaUrl = json.data.url;
-        mediaType = json.data.mediaType;
-      } catch {
-        toast.error("Upload failed");
+        const uploadResult = await uploadMedia(mediaFile);
+        mediaUrl = uploadResult.url;
+        mediaType = uploadResult.mediaType;
+        setUploadProgress(100);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Upload failed";
+        toast.error(message);
         setUploading(false);
+        setUploadProgress(0);
         return;
       }
+
       setUploading(false);
     }
 
@@ -124,7 +201,11 @@ export function PostComposer({ onPostCreated }: PostComposerProps) {
         body: JSON.stringify({ content: data.content, tags, mediaUrl, mediaType }),
       });
       const json = await res.json();
-      if (!res.ok) { toast.error(json.error ?? "Failed to post"); return; }
+      if (!res.ok) {
+        toast.error(json.error ?? "Failed to post");
+        return;
+      }
+
       toast.success("Posted!");
       reset();
       setTags([]);
@@ -161,7 +242,7 @@ export function PostComposer({ onPostCreated }: PostComposerProps) {
               <div className="space-y-1">
                 <p className="text-sm font-semibold text-slate-900">Add media</p>
                 <p className="text-xs leading-5 text-slate-500">
-                  Upload a photo or video from your device.
+                  Upload images, videos, audio, or documents from your device.
                 </p>
               </div>
               <Button
@@ -215,7 +296,7 @@ export function PostComposer({ onPostCreated }: PostComposerProps) {
                   {isDragging ? "Release to upload" : "Drag and drop a file here"}
                 </p>
                 <p className="mt-1 max-w-sm text-xs leading-5 text-slate-500">
-                  Or click to browse. Supports images, videos, and other files up to 20MB.
+                  Or click to browse. Supports common media and document formats up to 100MB.
                 </p>
               </div>
             )}
@@ -225,7 +306,10 @@ export function PostComposer({ onPostCreated }: PostComposerProps) {
                 <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2">
                   <div className="min-w-0">
                     <p className="text-xs font-medium text-slate-900">Selected media</p>
-                    <p className="truncate text-xs text-slate-500">{mediaFile?.name ?? "Selected media"}</p>
+                    <p className="truncate text-xs text-slate-500">
+                      {mediaFile?.name ?? "Selected media"}
+                      {mediaFile ? ` • ${formatBytes(mediaFile.size)}` : ""}
+                    </p>
                   </div>
                   <Button
                     type="button"
@@ -253,6 +337,19 @@ export function PostComposer({ onPostCreated }: PostComposerProps) {
                     </div>
                   </div>
                 )}
+              </div>
+            )}
+
+            {uploading && mediaFile && (
+              <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <p className="text-xs font-medium text-slate-700">Uploading media</p>
+                  <p className="text-xs text-slate-500">{uploadProgress}%</p>
+                </div>
+                <Progress
+                  value={uploadProgress}
+                  className="h-2 bg-slate-200 [&_[data-slot=progress-indicator]]:bg-slate-900"
+                />
               </div>
             )}
           </div>
@@ -290,16 +387,17 @@ export function PostComposer({ onPostCreated }: PostComposerProps) {
           </div>
 
           <input
+            key={inputKey}
             ref={fileRef}
             type="file"
-            accept="*/*"
+            accept={FILE_INPUT_ACCEPT}
             className="hidden"
             onChange={handleFileChange}
           />
         </CardContent>
         <CardFooter className="flex items-center justify-between pt-0">
           <div className="text-xs text-muted-foreground">
-            Local image and video uploads only
+            Images, video, audio, and documents up to {Math.round(MAX_UPLOAD_SIZE / (1024 * 1024))}MB
           </div>
           <div className="flex items-center gap-2">
             <span className={`text-xs ${content.length > 1800 ? "text-destructive" : "text-muted-foreground"}`}>
@@ -319,4 +417,3 @@ export function PostComposer({ onPostCreated }: PostComposerProps) {
     </Card>
   );
 }
-
