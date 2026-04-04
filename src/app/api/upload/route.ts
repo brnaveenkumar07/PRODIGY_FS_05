@@ -123,14 +123,27 @@ export async function POST(req: NextRequest) {
     const blobToken = getBlobToken();
     const buffer = Buffer.from(await file.arrayBuffer());
 
-    if (blobToken) {
+    // In production, always try Vercel Blob first. When deployed in the same
+    // Vercel project as the Blob store, the SDK can resolve the token from
+    // the deployment environment even if our manual pre-check returns null.
+    if (blobToken || IS_PRODUCTION) {
       try {
-        const blob = await put(filename, buffer, {
+        const blobOptions: {
+          access: "public";
+          addRandomSuffix: false;
+          contentType?: string;
+          token?: string;
+        } = {
           access: "public",
           addRandomSuffix: false,
           contentType: file.type || undefined,
-          token: blobToken,
-        });
+        };
+
+        if (blobToken) {
+          blobOptions.token = blobToken;
+        }
+
+        const blob = await put(filename, buffer, blobOptions);
 
         return apiSuccess(
           {
